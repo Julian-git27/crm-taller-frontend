@@ -1,7 +1,7 @@
 'use client';
 
 import AppLayout from '@/components/AppLayout';
-import { Row, Col, Card, Statistic, Tag, Table, Button, DatePicker, Space, Select, message, Input, Badge, Spin } from 'antd';
+import { Row, Col, Card, Statistic, Tag, Table, Button, DatePicker, Space, Select, message, Input, Badge, Spin, Modal, Form, notification } from 'antd';
 import {
   DollarOutlined,
   FileTextOutlined,
@@ -21,6 +21,8 @@ import {
   UnorderedListOutlined,
   FileDoneOutlined,
   LockOutlined,
+  EyeInvisibleOutlined,
+  EyeTwoTone,
 } from '@ant-design/icons';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -48,6 +50,11 @@ export default function DashboardPage() {
   const [loadingFacturas, setLoadingFacturas] = useState(false);
   const [userRol, setUserRol] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  
+  // Estados para cambio de contraseña
+  const [changePasswordModal, setChangePasswordModal] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [form] = Form.useForm();
 
   // Verificar autenticación y rol
   useEffect(() => {
@@ -123,6 +130,33 @@ export default function DashboardPage() {
       }
     } finally {
       setLoadingFacturas(false);
+    }
+  };
+
+  // Función para cambiar contraseña
+  const handleChangePassword = async (values: any) => {
+    setChangingPassword(true);
+    try {
+      await api.put('/auth/change-password', {
+        currentPassword: values.currentPassword,
+        newPassword: values.newPassword
+      });
+      
+      notification.success({
+        message: 'Contraseña actualizada',
+        description: 'Tu contraseña ha sido cambiada exitosamente.',
+      });
+      
+      setChangePasswordModal(false);
+      form.resetFields();
+    } catch (error: any) {
+      console.error('Error cambiando contraseña:', error);
+      notification.error({
+        message: 'Error al cambiar contraseña',
+        description: error.response?.data?.message || 'Error desconocido',
+      });
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -733,10 +767,9 @@ export default function DashboardPage() {
     );
   }
 
-  // Modifica el return para agregar indicador de rol
   return (
     <AppLayout title="Dashboard del Taller">
-      {/* Indicador de autorización */}
+      {/* Indicador de autorización con botón para cambiar contraseña */}
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <Tag color="blue" icon={<LockOutlined />}>
@@ -746,8 +779,17 @@ export default function DashboardPage() {
             <CheckCircleOutlined /> Autorizado
           </Tag>
         </div>
-        <div style={{ fontSize: '12px', color: '#666' }}>
-          <CalendarOutlined /> {periodoText}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <Button 
+            type="link" 
+            icon={<LockOutlined />}
+            onClick={() => setChangePasswordModal(true)}
+          >
+            Cambiar Contraseña
+          </Button>
+          <span style={{ fontSize: '12px', color: '#666' }}>
+            <CalendarOutlined /> {periodoText}
+          </span>
         </div>
       </div>
 
@@ -1292,6 +1334,88 @@ export default function DashboardPage() {
           </Card>
         </Col>
       </Row>
+
+      {/* Modal para cambiar contraseña */}
+      <Modal
+        title={
+          <Space>
+            <LockOutlined />
+            <span>Cambiar Contraseña</span>
+          </Space>
+        }
+        open={changePasswordModal}
+        onCancel={() => {
+          setChangePasswordModal(false);
+          form.resetFields();
+        }}
+        onOk={() => form.submit()}
+        confirmLoading={changingPassword}
+        okText="Cambiar Contraseña"
+        cancelText="Cancelar"
+        width={400}
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleChangePassword}
+          style={{ marginTop: '20px' }}
+        >
+          <Form.Item
+            name="currentPassword"
+            label="Contraseña Actual"
+            rules={[
+              { required: true, message: 'Por favor ingresa tu contraseña actual' },
+              { min: 6, message: 'La contraseña debe tener al menos 6 caracteres' }
+            ]}
+          >
+            <Input.Password
+              placeholder="Ingresa tu contraseña actual"
+              iconRender={(visible) => (visible ? <EyeTwoTone /> : <EyeInvisibleOutlined />)}
+              size="large"
+            />
+          </Form.Item>
+          
+          <Form.Item
+            name="newPassword"
+            label="Nueva Contraseña"
+            rules={[
+              { required: true, message: 'Por favor ingresa la nueva contraseña' },
+              { min: 6, message: 'La contraseña debe tener al menos 6 caracteres' }
+            ]}
+            hasFeedback
+          >
+            <Input.Password
+              placeholder="Ingresa la nueva contraseña"
+              iconRender={(visible) => (visible ? <EyeTwoTone /> : <EyeInvisibleOutlined />)}
+              size="large"
+            />
+          </Form.Item>
+          
+          <Form.Item
+            name="confirmPassword"
+            label="Confirmar Nueva Contraseña"
+            dependencies={['newPassword']}
+            rules={[
+              { required: true, message: 'Por favor confirma la nueva contraseña' },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || getFieldValue('newPassword') === value) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error('Las contraseñas no coinciden'));
+                },
+              }),
+            ]}
+            hasFeedback
+          >
+            <Input.Password
+              placeholder="Confirma la nueva contraseña"
+              iconRender={(visible) => (visible ? <EyeTwoTone /> : <EyeInvisibleOutlined />)}
+              size="large"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </AppLayout>
   );
 }
