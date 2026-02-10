@@ -265,11 +265,44 @@ export function exportFacturaSimplificada(factura: any) {
   doc.setFontSize(9);
 
   const detalles = factura.detalles || factura.orden?.detalles || [];
+  
+  // 🔥 NUEVO: Determinar si es tarjeta de crédito
+  const metodoPago = factura.metodo_pago || '';
+  const esTarjetaCredito = metodoPago.toUpperCase() === 'TARJETA_CREDITO';
+  
+  // Función para determinar tipo de item
+  const determinarTipoItem = (descripcion: string): string => {
+    const desc = (descripcion || '').toLowerCase();
+    
+    // Palabras clave para servicios
+    const keywordsServicios = [
+      'servicio', 'mantenimiento', 'reparación', 'diagnóstico', 'alineación',
+      'balanceo', 'cambio', 'revisión', 'instalación', 'montaje', 'desmontaje',
+      'limpieza', 'ajuste', 'calibración', 'sincronización', 'prueba', 'test',
+      'mano de obra', 'labor', 'trabajo', 'inspección', 'chequeo', 'control',
+      'evaluación', 'análisis', 'medición', 'verificación'
+    ];
+    
+    for (const keyword of keywordsServicios) {
+      if (desc.includes(keyword)) return 'servicio';
+    }
+    
+    return 'producto';
+  };
 
   detalles.forEach((d: any) => {
     const qty = ensureNumber(d.cantidad);
     const price = ensureNumber(d.precio_unitario);
-    const total = qty * price;
+    const tipo = determinarTipoItem(d.descripcion);
+    
+    // 🔥 CALCULAR VALOR CORRECTO SEGÚN TIPO Y MÉTODO DE PAGO
+    let totalSinIva = qty * price;
+    let totalMostrar = totalSinIva;
+    
+    if (esTarjetaCredito && tipo === 'servicio') {
+      // Aplicar IVA 19% solo a servicios cuando es tarjeta de crédito
+      totalMostrar = totalSinIva * 1.19;
+    }
 
     const lines = doc.splitTextToSize(d.descripcion || 'Item', W - 90);
     const startY = y;
@@ -280,7 +313,7 @@ export function exportFacturaSimplificada(factura: any) {
     });
 
     doc.text(qty.toString(), W - 70, startY);
-    doc.text(formatPrice(total), W - 10, startY, { align: 'right' });
+    doc.text(formatPrice(totalMostrar), W - 10, startY, { align: 'right' });
 
     y += 4;
   });
@@ -290,14 +323,36 @@ export function exportFacturaSimplificada(factura: any) {
 
   /* ---------- TOTALES ---------- */
 
-  const subtotal = detalles.reduce(
-    (s: number, d: any) =>
-      s + ensureNumber(d.cantidad) * ensureNumber(d.precio_unitario),
-    0
-  );
+  // 🔥 CALCULAR TOTALES CORRECTAMENTE
+  let subtotalServicios = 0;
+  let subtotalProductos = 0;
+  let ivaServicios = 0;
+  let totalServiciosConIva = 0;
 
-  const iva = subtotal * 0.19;
-  const total = subtotal + iva;
+  detalles.forEach((d: any) => {
+    const qty = ensureNumber(d.cantidad);
+    const price = ensureNumber(d.precio_unitario);
+    const tipo = determinarTipoItem(d.descripcion);
+    const valor = qty * price;
+    
+    if (tipo === 'servicio') {
+      subtotalServicios += valor;
+      
+      if (esTarjetaCredito) {
+        // Aplicar IVA 19% solo a servicios cuando es tarjeta de crédito
+        const ivaItem = valor * 0.19;
+        ivaServicios += ivaItem;
+        totalServiciosConIva += valor + ivaItem;
+      } else {
+        totalServiciosConIva += valor;
+      }
+    } else {
+      subtotalProductos += valor; // Productos nunca tienen IVA
+    }
+  });
+
+  const totalGeneral = totalServiciosConIva + subtotalProductos;
+  const subtotalTotal = subtotalServicios + subtotalProductos;
 
   const totalRow = (label: string, value: number, bold = false) => {
     doc.setFont('helvetica', bold ? 'bold' : 'normal');
@@ -306,10 +361,16 @@ export function exportFacturaSimplificada(factura: any) {
     y += bold ? 10 : 6;
   };
 
-  totalRow('SUBTOTAL', subtotal);
-  totalRow('IVA 19%', iva);
+  // Mostrar subtotal total
+  totalRow('SUBTOTAL', subtotalTotal);
+  
+  // Mostrar IVA solo si es tarjeta de crédito y hay servicios
+  if (esTarjetaCredito && ivaServicios > 0) {
+    totalRow('IVA (19%)', ivaServicios);
+  }
+  
   line(6);
-  totalRow('TOTAL', total, true);
+  totalRow('TOTAL', totalGeneral, true);
 
   y += 10;
 
@@ -319,6 +380,16 @@ export function exportFacturaSimplificada(factura: any) {
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
     doc.text(`Método de pago: ${factura.metodo_pago}`, 10, y);
+    y += 8;
+  }
+
+  // 🔥 NUEVO: Información sobre el IVA si aplica
+  if (esTarjetaCredito && ivaServicios > 0) {
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'italic');
+    doc.text('* Se ha aplicado IVA del 19% solo a los servicios', 10, y);
+    y += 5;
+    doc.text('* Los productos no incluyen IVA en ningún método de pago', 10, y);
     y += 8;
   }
 
@@ -489,16 +560,52 @@ export function exportFacturaTicketTermico(factura: any) {
   sep();
 
   const detalles = factura.detalles || [];
+  
+  // 🔥 NUEVO: Determinar si es tarjeta de crédito
+  const metodoPago = factura.metodo_pago || '';
+  const esTarjetaCredito = metodoPago.toUpperCase() === 'TARJETA_CREDITO';
+  
+  // Función para determinar tipo de item
+  const determinarTipoItem = (descripcion: string): string => {
+    const desc = (descripcion || '').toLowerCase();
+    
+    // Palabras clave para servicios
+    const keywordsServicios = [
+      'servicio', 'mantenimiento', 'reparación', 'diagnóstico', 'alineación',
+      'balanceo', 'cambio', 'revisión', 'instalación', 'montaje', 'desmontaje',
+      'limpieza', 'ajuste', 'calibración', 'sincronización', 'prueba', 'test',
+      'mano de obra', 'labor', 'trabajo', 'inspección', 'chequeo', 'control',
+      'evaluación', 'análisis', 'medición', 'verificación'
+    ];
+    
+    for (const keyword of keywordsServicios) {
+      if (desc.includes(keyword)) return 'servicio';
+    }
+    
+    return 'producto';
+  };
 
   detalles.forEach((d: any) => {
-    const total = ensureNumber(d.cantidad) * ensureNumber(d.precio_unitario);
+    const qty = ensureNumber(d.cantidad);
+    const price = ensureNumber(d.precio_unitario);
+    const tipo = determinarTipoItem(d.descripcion);
+    
+    // 🔥 CALCULAR VALOR CORRECTO SEGÚN TIPO Y MÉTODO DE PAGO
+    let totalSinIva = qty * price;
+    let totalMostrar = totalSinIva;
+    
+    if (esTarjetaCredito && tipo === 'servicio') {
+      // Aplicar IVA 19% solo a servicios cuando es tarjeta de crédito
+      totalMostrar = totalSinIva * 1.19;
+    }
+
     const desc = truncateText(d.descripcion, 20);
     
     // Descripción
     const descLines = doc.splitTextToSize(desc, 140);
     descLines.forEach((line: string, index: number) => {
       if (index === 0) {
-        doc.text(`${line.padEnd(25)}${formatPrice(total).padStart(12)}`, 10, y);
+        doc.text(`${line.padEnd(25)}${formatPrice(totalMostrar).padStart(12)}`, 10, y);
       } else {
         doc.text(line, 10, y);
       }
@@ -515,21 +622,48 @@ export function exportFacturaTicketTermico(factura: any) {
 
   /* ---------- TOTALES ---------- */
 
-  const subtotal = detalles.reduce(
-    (s: number, d: any) =>
-      s + ensureNumber(d.cantidad) * ensureNumber(d.precio_unitario),
-    0
-  );
+  // 🔥 CALCULAR TOTALES CORRECTAMENTE
+  let subtotalServicios = 0;
+  let subtotalProductos = 0;
+  let ivaServicios = 0;
+  let totalServiciosConIva = 0;
 
-  const iva = subtotal * 0.19;
-  const total = subtotal + iva;
+  detalles.forEach((d: any) => {
+    const qty = ensureNumber(d.cantidad);
+    const price = ensureNumber(d.precio_unitario);
+    const tipo = determinarTipoItem(d.descripcion);
+    const valor = qty * price;
+    
+    if (tipo === 'servicio') {
+      subtotalServicios += valor;
+      
+      if (esTarjetaCredito) {
+        // Aplicar IVA 19% solo a servicios cuando es tarjeta de crédito
+        const ivaItem = valor * 0.19;
+        ivaServicios += ivaItem;
+        totalServiciosConIva += valor + ivaItem;
+      } else {
+        totalServiciosConIva += valor;
+      }
+    } else {
+      subtotalProductos += valor; // Productos nunca tienen IVA
+    }
+  });
 
-  lineLeft(`SUBTOTAL ${formatPrice(subtotal).padStart(20)}`);
-  lineLeft(`IVA 19%  ${formatPrice(iva).padStart(20)}`);
+  const totalGeneral = totalServiciosConIva + subtotalProductos;
+  const subtotalTotal = subtotalServicios + subtotalProductos;
+
+  lineLeft(`SUBTOTAL ${formatPrice(subtotalTotal).padStart(20)}`);
+  
+  // Mostrar IVA solo si es tarjeta de crédito y hay servicios
+  if (esTarjetaCredito && ivaServicios > 0) {
+    lineLeft(`IVA 19%   ${formatPrice(ivaServicios).padStart(20)}`);
+  }
+  
   y += 4;
   
   doc.setFont('Courier', 'bold');
-  lineLeft(`TOTAL    ${formatPrice(total).padStart(20)}`);
+  lineLeft(`TOTAL    ${formatPrice(totalGeneral).padStart(20)}`);
   doc.setFont('Courier', 'normal');
   
   y += 4;
@@ -539,6 +673,13 @@ export function exportFacturaTicketTermico(factura: any) {
   
   if (factura.metodo_pago) {
     lineLeft(`Método: ${factura.metodo_pago}`);
+    y += 4;
+  }
+
+  // 🔥 NUEVO: Información sobre el IVA si aplica
+  if (esTarjetaCredito && ivaServicios > 0) {
+    lineLeft('* IVA 19% aplicado solo a servicios');
+    lineLeft('* Productos sin IVA');
     y += 4;
   }
 
