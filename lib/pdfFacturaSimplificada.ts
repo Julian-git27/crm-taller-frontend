@@ -71,6 +71,82 @@ const obtenerVehiculoUnificado = (factura: any): any => {
    FACTURA SIMPLIFICADA (NORMAL)
 ===================================================== */
 
+const determinarTipo = (detalle: any): string => {
+  // Si ya tiene tipo definido, usarlo
+  if (detalle.tipo) {
+    return detalle.tipo.toLowerCase();
+  }
+  
+  // Si tiene productoId, es producto
+  if (detalle.productoId) {
+    return 'producto';
+  }
+  
+  // Si tiene servicioId, es servicio
+  if (detalle.servicioId) {
+    return 'servicio';
+  }
+  
+  // Intentar determinar por descripción
+  return determinarTipoItem(detalle.descripcion || '');
+};
+
+// 🔥 MISMA FUNCIÓN DE DETERMINAR TIPO POR DESCRIPCIÓN
+function determinarTipoItem(descripcion: string): string {
+  const desc = descripcion.toLowerCase();
+  
+  // Palabras clave para servicios
+  const keywordsServicios = [
+    'servicio', 'mantenimiento', 'reparación', 'diagnóstico', 'alineación',
+    'balanceo', 'cambio', 'revisión', 'instalación', 'montaje', 'desmontaje',
+    'limpieza', 'ajuste', 'calibración', 'sincronización', 'prueba', 'test',
+    'mano de obra', 'labor', 'trabajo', 'inspección', 'chequeo', 'control',
+    'evaluación', 'análisis', 'medición', 'verificación'
+  ];
+  
+  // Palabras clave para productos
+  const keywordsProductos = [
+    'filtro', 'aceite', 'bujía', 'pastilla', 'disco', 'neumático', 'llanta',
+    'batería', 'amortiguador', 'bomba', 'correa', 'manguera', 'fusible',
+    'bombillo', 'lámpara', 'sensor', 'pieza', 'repuesto', 'kit', 'juego',
+    'refacción', 'accesorio', 'herramienta', 'material', 'lubricante',
+    'aditivo', 'freno', 'embrague', 'radiador', 'alternador', 'motor',
+    'caja', 'transmisión', 'escape', 'suspensión'
+  ];
+  
+  // Buscar palabras clave de servicios
+  for (const keyword of keywordsServicios) {
+    if (desc.includes(keyword)) return 'servicio';
+  }
+  
+  // Buscar palabras clave de productos
+  for (const keyword of keywordsProductos) {
+    if (desc.includes(keyword)) return 'producto';
+  }
+  
+  return 'producto'; // Por defecto
+}
+
+// 🔥 MISMA FUNCIÓN PARA FORMATEAR MÉTODO DE PAGO
+function formatearMetodoPago(metodo: string): string {
+  const metodos: Record<string, string> = {
+    'EFECTIVO': 'Efectivo',
+    'TARJETA_CREDITO': 'Tarjeta de Crédito',
+    'TARJETA_DEBITO': 'Tarjeta de Débito',
+    'TRANSFERENCIA': 'Transferencia',
+    'CHEQUE': 'Cheque',
+    'OTRO': 'Otro',
+    'CONTADO': 'Contado'
+  };
+  
+  const metodoUpper = metodo.toUpperCase();
+  return metodos[metodoUpper] || metodo;
+}
+
+/* =====================================================
+   FACTURA SIMPLIFICADA (NORMAL) - CORREGIDA
+===================================================== */
+
 export function exportFacturaSimplificada(factura: any) {
   if (!factura) {
     console.error('❌ Factura no definida');
@@ -266,43 +342,54 @@ export function exportFacturaSimplificada(factura: any) {
 
   const detalles = factura.detalles || factura.orden?.detalles || [];
   
-  // 🔥 NUEVO: Determinar si es tarjeta de crédito
+  // 🔥 CORREGIDO: Usar la misma detección que en exportFacturaPDF
   const metodoPago = factura.metodo_pago || '';
   const esTarjetaCredito = metodoPago.toUpperCase() === 'TARJETA_CREDITO';
-  
-  // Función para determinar tipo de item
-  const determinarTipoItem = (descripcion: string): string => {
-    const desc = (descripcion || '').toLowerCase();
-    
-    // Palabras clave para servicios
-    const keywordsServicios = [
-      'servicio', 'mantenimiento', 'reparación', 'diagnóstico', 'alineación',
-      'balanceo', 'cambio', 'revisión', 'instalación', 'montaje', 'desmontaje',
-      'limpieza', 'ajuste', 'calibración', 'sincronización', 'prueba', 'test',
-      'mano de obra', 'labor', 'trabajo', 'inspección', 'chequeo', 'control',
-      'evaluación', 'análisis', 'medición', 'verificación'
-    ];
-    
-    for (const keyword of keywordsServicios) {
-      if (desc.includes(keyword)) return 'servicio';
-    }
-    
-    return 'producto';
-  };
+
+  // 🔥 CALCULAR TOTALES CORRECTAMENTE (igual que en exportFacturaPDF)
+  let subtotalServiciosSinIva = 0;
+  let subtotalProductos = 0;
+  let ivaServicios = 0;
+  let totalServiciosConIva = 0;
 
   detalles.forEach((d: any) => {
-    const qty = ensureNumber(d.cantidad);
-    const price = ensureNumber(d.precio_unitario);
-    const tipo = determinarTipoItem(d.descripcion);
+    const cantidad = ensureNumber(d.cantidad);
+    const precioUnitario = ensureNumber(d.precio_unitario);
+    const tipo = determinarTipo(d); // 🔥 Usar la función correcta
     
-    // 🔥 CALCULAR VALOR CORRECTO SEGÚN TIPO Y MÉTODO DE PAGO
-    let totalSinIva = qty * price;
-    let totalMostrar = totalSinIva;
+    // Valor sin IVA
+    const valorSinIva = cantidad * precioUnitario;
     
-    if (esTarjetaCredito && tipo === 'servicio') {
-      // Aplicar IVA 19% solo a servicios cuando es tarjeta de crédito
-      totalMostrar = totalSinIva * 1.19;
+    // Acumular por tipo
+    if (tipo === 'servicio') {
+      subtotalServiciosSinIva += valorSinIva;
+      
+      if (esTarjetaCredito) {
+        // APLICAR IVA 19% solo a servicios cuando es TARJETA DE CRÉDITO
+        const ivaItem = valorSinIva * 0.19;
+        ivaServicios += ivaItem;
+        totalServiciosConIva += valorSinIva + ivaItem;
+      } else {
+        totalServiciosConIva += valorSinIva; // Sin IVA para otros métodos
+      }
+    } else {
+      subtotalProductos += valorSinIva; // Productos nunca tienen IVA
     }
+  });
+
+  // Mostrar detalles en la tabla
+  detalles.forEach((d: any) => {
+    const cantidad = ensureNumber(d.cantidad);
+    const precioUnitario = ensureNumber(d.precio_unitario);
+    const tipo = determinarTipo(d); // 🔥 Usar la función correcta
+    
+    // Valor sin IVA
+    const valorSinIva = cantidad * precioUnitario;
+    
+    // 🔥 CALCULAR VALOR A MOSTRAR (igual que en exportFacturaPDF)
+    const valorMostrar = esTarjetaCredito && tipo === 'servicio' 
+      ? valorSinIva * 1.19 
+      : valorSinIva;
 
     const lines = doc.splitTextToSize(d.descripcion || 'Item', W - 90);
     const startY = y;
@@ -312,8 +399,8 @@ export function exportFacturaSimplificada(factura: any) {
       y += 5;
     });
 
-    doc.text(qty.toString(), W - 70, startY);
-    doc.text(formatPrice(totalMostrar), W - 10, startY, { align: 'right' });
+    doc.text(cantidad.toString(), W - 70, startY);
+    doc.text(formatPrice(valorMostrar), W - 10, startY, { align: 'right' });
 
     y += 4;
   });
@@ -323,54 +410,37 @@ export function exportFacturaSimplificada(factura: any) {
 
   /* ---------- TOTALES ---------- */
 
-  // 🔥 CALCULAR TOTALES CORRECTAMENTE
-  let subtotalServicios = 0;
-  let subtotalProductos = 0;
-  let ivaServicios = 0;
-  let totalServiciosConIva = 0;
-
-  detalles.forEach((d: any) => {
-    const qty = ensureNumber(d.cantidad);
-    const price = ensureNumber(d.precio_unitario);
-    const tipo = determinarTipoItem(d.descripcion);
-    const valor = qty * price;
-    
-    if (tipo === 'servicio') {
-      subtotalServicios += valor;
-      
-      if (esTarjetaCredito) {
-        // Aplicar IVA 19% solo a servicios cuando es tarjeta de crédito
-        const ivaItem = valor * 0.19;
-        ivaServicios += ivaItem;
-        totalServiciosConIva += valor + ivaItem;
-      } else {
-        totalServiciosConIva += valor;
-      }
-    } else {
-      subtotalProductos += valor; // Productos nunca tienen IVA
-    }
-  });
-
+  // 🔥 CALCULOS FINALES (igual que en exportFacturaPDF)
   const totalGeneral = totalServiciosConIva + subtotalProductos;
-  const subtotalTotal = subtotalServicios + subtotalProductos;
+  const subtotalTotal = subtotalServiciosSinIva + subtotalProductos;
 
-  const totalRow = (label: string, value: number, bold = false) => {
-    doc.setFont('helvetica', bold ? 'bold' : 'normal');
-    doc.text(label, W - 90, y);
-    doc.text(formatPrice(value), W - 10, y, { align: 'right' });
-    y += bold ? 10 : 6;
-  };
+  const COL_LABEL = 10;
+const COL_VALUE = W - 10;
+
+const totalRow = (label: string, value: number, bold = false) => {
+  doc.setFont('helvetica', bold ? 'bold' : 'normal');
+  
+  // Label bien a la izquierda
+  doc.text(label, COL_LABEL, y);
+  
+  // Valor bien alineado a la derecha
+  doc.text(formatPrice(value), COL_VALUE, y, { align: 'right' });
+
+  y += bold ? 10 : 6;
+};
 
   // Mostrar subtotal total
-  totalRow('SUBTOTAL', subtotalTotal);
+  totalRow('SUBTOTAL SIN IVA', subtotalTotal);
   
   // Mostrar IVA solo si es tarjeta de crédito y hay servicios
   if (esTarjetaCredito && ivaServicios > 0) {
-    totalRow('IVA (19%)', ivaServicios);
+    totalRow('IVA SERVICIOS (19%)', ivaServicios);
   }
   
   line(6);
-  totalRow('TOTAL', totalGeneral, true);
+  
+  // 🔥 NUEVO: Siempre mostrar el TOTAL GENERAL (que ya incluye IVA si aplica)
+  totalRow('TOTAL GENERAL', totalGeneral, true);
 
   y += 10;
 
@@ -379,17 +449,26 @@ export function exportFacturaSimplificada(factura: any) {
   if (factura.metodo_pago) {
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
-    doc.text(`Método de pago: ${factura.metodo_pago}`, 10, y);
+    doc.text(`Método de pago: ${formatearMetodoPago(factura.metodo_pago)}`, 10, y);
     y += 8;
   }
 
-  // 🔥 NUEVO: Información sobre el IVA si aplica
-  if (esTarjetaCredito && ivaServicios > 0) {
+  // 🔥 NUEVO: Información sobre el IVA si aplica (igual que en exportFacturaPDF)
+  if (esTarjetaCredito && detalles.some((d: any) => determinarTipo(d) === 'servicio')) {
     doc.setFontSize(7);
     doc.setFont('helvetica', 'italic');
-    doc.text('* Se ha aplicado IVA del 19% solo a los servicios', 10, y);
-    y += 5;
-    doc.text('* Los productos no incluyen IVA en ningún método de pago', 10, y);
+    
+    if (ivaServicios > 0) {
+      doc.text('* Se ha aplicado el 19% de IVA únicamente a los SERVICIOS.', 10, y);
+      y += 5;
+      doc.text('* Los PRODUCTOS no incluyen IVA en ningún método de pago.', 10, y);
+      y += 5;
+      doc.text('* Método de pago: TARJETA DE CRÉDITO (obligatorio aplicar IVA).', 10, y);
+    } else {
+      doc.text('* Método de pago: TARJETA DE CRÉDITO.', 10, y);
+      y += 5;
+      doc.text('* No hay servicios en esta factura para aplicar IVA.', 10, y);
+    }
     y += 8;
   }
 
@@ -404,12 +483,12 @@ export function exportFacturaSimplificada(factura: any) {
   y += 5;
   doc.text('Este documento es una factura simplificada', W / 2, y, { align: 'center' });
 
-  console.log('✅ PDF generado exitosamente');
+  console.log('✅ PDF simplificado generado exitosamente');
   doc.save(`Factura_F-${factura.id}_${new Date().getTime()}.pdf`);
 }
 
 /* =====================================================
-   FACTURA TICKET TÉRMICO
+   FACTURA TICKET TÉRMICO - CORREGIDA
 ===================================================== */
 
 export function exportFacturaTicketTermico(factura: any) {
@@ -561,43 +640,54 @@ export function exportFacturaTicketTermico(factura: any) {
 
   const detalles = factura.detalles || [];
   
-  // 🔥 NUEVO: Determinar si es tarjeta de crédito
+  // 🔥 CORREGIDO: Usar la misma detección que en exportFacturaPDF
   const metodoPago = factura.metodo_pago || '';
   const esTarjetaCredito = metodoPago.toUpperCase() === 'TARJETA_CREDITO';
-  
-  // Función para determinar tipo de item
-  const determinarTipoItem = (descripcion: string): string => {
-    const desc = (descripcion || '').toLowerCase();
-    
-    // Palabras clave para servicios
-    const keywordsServicios = [
-      'servicio', 'mantenimiento', 'reparación', 'diagnóstico', 'alineación',
-      'balanceo', 'cambio', 'revisión', 'instalación', 'montaje', 'desmontaje',
-      'limpieza', 'ajuste', 'calibración', 'sincronización', 'prueba', 'test',
-      'mano de obra', 'labor', 'trabajo', 'inspección', 'chequeo', 'control',
-      'evaluación', 'análisis', 'medición', 'verificación'
-    ];
-    
-    for (const keyword of keywordsServicios) {
-      if (desc.includes(keyword)) return 'servicio';
-    }
-    
-    return 'producto';
-  };
+
+  // 🔥 CALCULAR TOTALES CORRECTAMENTE (igual que en exportFacturaPDF)
+  let subtotalServiciosSinIva = 0;
+  let subtotalProductos = 0;
+  let ivaServicios = 0;
+  let totalServiciosConIva = 0;
 
   detalles.forEach((d: any) => {
-    const qty = ensureNumber(d.cantidad);
-    const price = ensureNumber(d.precio_unitario);
-    const tipo = determinarTipoItem(d.descripcion);
+    const cantidad = ensureNumber(d.cantidad);
+    const precioUnitario = ensureNumber(d.precio_unitario);
+    const tipo = determinarTipo(d); // 🔥 Usar la función correcta
     
-    // 🔥 CALCULAR VALOR CORRECTO SEGÚN TIPO Y MÉTODO DE PAGO
-    let totalSinIva = qty * price;
-    let totalMostrar = totalSinIva;
+    // Valor sin IVA
+    const valorSinIva = cantidad * precioUnitario;
     
-    if (esTarjetaCredito && tipo === 'servicio') {
-      // Aplicar IVA 19% solo a servicios cuando es tarjeta de crédito
-      totalMostrar = totalSinIva * 1.19;
+    // Acumular por tipo
+    if (tipo === 'servicio') {
+      subtotalServiciosSinIva += valorSinIva;
+      
+      if (esTarjetaCredito) {
+        // APLICAR IVA 19% solo a servicios cuando es TARJETA DE CRÉDITO
+        const ivaItem = valorSinIva * 0.19;
+        ivaServicios += ivaItem;
+        totalServiciosConIva += valorSinIva + ivaItem;
+      } else {
+        totalServiciosConIva += valorSinIva; // Sin IVA para otros métodos
+      }
+    } else {
+      subtotalProductos += valorSinIva; // Productos nunca tienen IVA
     }
+  });
+
+  // Mostrar detalles
+  detalles.forEach((d: any) => {
+    const cantidad = ensureNumber(d.cantidad);
+    const precioUnitario = ensureNumber(d.precio_unitario);
+    const tipo = determinarTipo(d); // 🔥 Usar la función correcta
+    
+    // Valor sin IVA
+    const valorSinIva = cantidad * precioUnitario;
+    
+    // 🔥 CALCULAR VALOR A MOSTRAR (igual que en exportFacturaPDF)
+    const valorMostrar = esTarjetaCredito && tipo === 'servicio' 
+      ? valorSinIva * 1.19 
+      : valorSinIva;
 
     const desc = truncateText(d.descripcion, 20);
     
@@ -605,7 +695,7 @@ export function exportFacturaTicketTermico(factura: any) {
     const descLines = doc.splitTextToSize(desc, 140);
     descLines.forEach((line: string, index: number) => {
       if (index === 0) {
-        doc.text(`${line.padEnd(25)}${formatPrice(totalMostrar).padStart(12)}`, 10, y);
+        doc.text(`${line.padEnd(25)}${formatPrice(valorMostrar).padStart(12)}`, 10, y);
       } else {
         doc.text(line, 10, y);
       }
@@ -622,48 +712,23 @@ export function exportFacturaTicketTermico(factura: any) {
 
   /* ---------- TOTALES ---------- */
 
-  // 🔥 CALCULAR TOTALES CORRECTAMENTE
-  let subtotalServicios = 0;
-  let subtotalProductos = 0;
-  let ivaServicios = 0;
-  let totalServiciosConIva = 0;
-
-  detalles.forEach((d: any) => {
-    const qty = ensureNumber(d.cantidad);
-    const price = ensureNumber(d.precio_unitario);
-    const tipo = determinarTipoItem(d.descripcion);
-    const valor = qty * price;
-    
-    if (tipo === 'servicio') {
-      subtotalServicios += valor;
-      
-      if (esTarjetaCredito) {
-        // Aplicar IVA 19% solo a servicios cuando es tarjeta de crédito
-        const ivaItem = valor * 0.19;
-        ivaServicios += ivaItem;
-        totalServiciosConIva += valor + ivaItem;
-      } else {
-        totalServiciosConIva += valor;
-      }
-    } else {
-      subtotalProductos += valor; // Productos nunca tienen IVA
-    }
-  });
-
+  // 🔥 CALCULOS FINALES (igual que en exportFacturaPDF)
   const totalGeneral = totalServiciosConIva + subtotalProductos;
-  const subtotalTotal = subtotalServicios + subtotalProductos;
+  const subtotalTotal = subtotalServiciosSinIva + subtotalProductos;
 
-  lineLeft(`SUBTOTAL ${formatPrice(subtotalTotal).padStart(20)}`);
+  lineLeft(`SUBTOTAL SIN IVA ${formatPrice(subtotalTotal).padStart(15)}`);
   
   // Mostrar IVA solo si es tarjeta de crédito y hay servicios
   if (esTarjetaCredito && ivaServicios > 0) {
-    lineLeft(`IVA 19%   ${formatPrice(ivaServicios).padStart(20)}`);
+    lineLeft(`IVA SERVICIOS (19%) ${formatPrice(ivaServicios).padStart(10)}`);
   }
   
   y += 4;
+  sep();
   
+  // 🔥 NUEVO: Siempre mostrar el TOTAL GENERAL en negrita
   doc.setFont('Courier', 'bold');
-  lineLeft(`TOTAL    ${formatPrice(totalGeneral).padStart(20)}`);
+  lineLeft(`TOTAL GENERAL ${formatPrice(totalGeneral).padStart(15)}`);
   doc.setFont('Courier', 'normal');
   
   y += 4;
@@ -672,14 +737,20 @@ export function exportFacturaTicketTermico(factura: any) {
   /* ---------- MÉTODO DE PAGO ---------- */
   
   if (factura.metodo_pago) {
-    lineLeft(`Método: ${factura.metodo_pago}`);
+    lineLeft(`Método: ${formatearMetodoPago(factura.metodo_pago)}`);
     y += 4;
   }
 
-  // 🔥 NUEVO: Información sobre el IVA si aplica
-  if (esTarjetaCredito && ivaServicios > 0) {
-    lineLeft('* IVA 19% aplicado solo a servicios');
-    lineLeft('* Productos sin IVA');
+  // 🔥 NUEVO: Información sobre el IVA si aplica (igual que en exportFacturaPDF)
+  if (esTarjetaCredito && detalles.some((d: any) => determinarTipo(d) === 'servicio')) {
+    if (ivaServicios > 0) {
+      lineLeft('* IVA 19% aplicado solo a servicios');
+      lineLeft('* Productos sin IVA');
+      lineLeft('* Método: Tarjeta de Crédito');
+    } else {
+      lineLeft('* Tarjeta de Crédito');
+      lineLeft('* Sin servicios para aplicar IVA');
+    }
     y += 4;
   }
 
@@ -695,7 +766,6 @@ export function exportFacturaTicketTermico(factura: any) {
   console.log('✅ Ticket térmico generado exitosamente');
   doc.save(`Ticket_Termico_${factura.id}_${new Date().getTime()}.pdf`);
 }
-
 // 🔥 NUEVA FUNCIÓN: Preparar factura antes de generar PDF
 export function prepararFacturaParaPDF(factura: any) {
   console.log('🔄 Preparando factura para PDF:', factura.id);
